@@ -1,0 +1,64 @@
+from __future__ import absolute_import, division, print_function
+
+import sys
+import warnings
+
+import torch
+from torch import nn
+
+warnings.filterwarnings("ignore")
+
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, GATConv
+
+sys.path.append("..")
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+#####################################
+##  Class for GNN implementations  ##
+#####################################
+
+
+class GraphNet(torch.nn.Module):
+    def __init__(self, config):
+        super(GraphNet, self).__init__()
+        self.in_dim = config['vocab_size']
+        self.embed_dim = config['embed_dim']
+        self.dropout = config['dropout']
+        self.fc_dim = config['fc_dim']
+        self.node_drop = config['node_drop']
+        self.model = config['model_name']
+        self.dropout = config["dropout"]
+        self.n_classes = config['n_classes']
+
+        if config['model_name'] == 'gcn':
+            self.conv1 = GCNConv(self.in_dim, self.embed_dim, improved=True)
+            self.conv2 = GCNConv(self.embed_dim, self.embed_dim, improved=True)
+            # self.conv2 = GCNConv(self.embed_dim, config['n_classes'], improved=True)
+
+        elif config['model_name'] == 'gat':
+            self.conv1 = GATConv(self.in_dim, self.embed_dim, heads=3, concat=True, dropout=0.1)
+            self.conv2 = GATConv(3 * self.embed_dim, self.embed_dim, heads=3, concat=True, dropout=0.1)
+            # self.conv2 = GATConv(3*self.embed_dim, config['n_classes'], heads=3, concat=False, dropout=0.1)
+
+        embed_dim = 3 * self.embed_dim if config['model_name'] == 'gat' else self.embed_dim
+
+        self.classifier = nn.Sequential(nn.Dropout(self.dropout),
+                                        nn.Linear(embed_dim, self.fc_dim),
+                                        nn.ReLU(),
+                                        nn.Linear(self.fc_dim, self.n_classes))
+
+    def forward(self, x, edge_index):
+
+        # node_mask = torch.FloatTensor(x.shape[0], 1).uniform_() > self.node_drop
+        # if self.training:
+        #     x = node_mask.to(device) * x  # / (1 - self.node_drop)
+        node_mask = None
+
+        x = F.relu(self.conv1(x.float(), edge_index))
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = self.conv2(x.float(), edge_index)
+        out = self.classifier(x)
+        return out, node_mask
