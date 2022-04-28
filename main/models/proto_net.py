@@ -8,7 +8,7 @@ from torch import optim
 from torch.nn import functional as func
 from tqdm.auto import tqdm
 
-from models.GraphTrainer import GraphTrainer
+from models.graph_trainer import GraphTrainer
 from models.gat_encoder_sparse_pushkar import GatNet
 from models.train_utils import *
 from samplers.graph_sampler import KHopSamplerSimple

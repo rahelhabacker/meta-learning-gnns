@@ -4,7 +4,7 @@ from torch import nn
 from torch.optim import AdamW, SGD
 from torch.optim.lr_scheduler import StepLR, MultiStepLR
 
-from models.GraphTrainer import GraphTrainer
+from models.graph_trainer import GraphTrainer
 from models.gat_encoder_sparse_pushkar import GatNet
 from models.train_utils import *
 
