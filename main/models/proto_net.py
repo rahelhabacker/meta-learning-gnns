@@ -25,10 +25,7 @@ class ProtoNet(GraphTrainer):
         super().__init__(validation_sets=['val'])
         self.save_hyperparameters()
 
-        # the output dimension for the prototypical network is not num classes, but the prototypes dimension!
-        model_params['output_dim'] = model_params['proto_dim']
-
-        self.num_classes = model_params["class_weight"].shape[0]
+        # self.num_classes = model_params["class_weight"].shape[0]
 
         self.target_class_idx = 1
 
@@ -72,7 +69,7 @@ class ProtoNet(GraphTrainer):
         return prototypes, classes
 
     @staticmethod
-    def classify_features(prototypes, feats, targets):
+    def classify_features(prototypes, feats):
         """
                 Classify new examples with prototypes and return classification error.
                 :param prototypes:
@@ -90,7 +87,7 @@ class ProtoNet(GraphTrainer):
         # for BCE with logits loss: don't use negative dist
         logits = dist
 
-        return logits, targets.view(-1, 1)
+        return logits
 
     def calculate_loss(self, batch, mode):
         """
@@ -120,7 +117,7 @@ class ProtoNet(GraphTrainer):
         assert query_logits.shape[0] == query_targets.shape[0], \
             "Nr of features returned does not equal nr. of classification nodes!"
 
-        logits, targets = ProtoNet.classify_features(prototypes, query_logits, query_targets)
+        logits = ProtoNet.classify_features(prototypes, query_logits)
         # logits and targets: batch size x 1
 
         # if predictions.shape[1] != self.num_classes:
@@ -136,12 +133,18 @@ class ProtoNet(GraphTrainer):
         # targets have dimensions according to classes which are in the subgraph batch, i.e. if all sub graphs have the
         # same label, targets has 2nd dimension = 1
 
-        loss = self.loss_module(logits, targets.float())
+        if logits.shape[1] == 2:
+            logits_target_class = logits[:, self.target_class_idx]
+        else:
+            # TODO: fix this somehow... now we are using 'real' logits for optimization; maybe project on one dim?
+            logits_target_class = logits.squeeze()
+
+        loss = self.loss_module(logits_target_class, query_targets.float())
 
         if mode == 'train' or mode == 'val':
             self.log_on_epoch(f"{mode}/loss", loss)
 
-        self.update_metrics(mode, logits, targets)
+        self.update_metrics(mode, logits_target_class, query_targets)
 
         return loss
 
@@ -223,10 +226,10 @@ def test_proto_net(model, dataset, data_feats=None, k_shot=4, num_classes=1):
                 continue
 
             e_node_feats, e_targets = get_as_set(e_idx, k_shot, node_features, node_targets, start_indices_per_class)
-            logits, targets = model.classify_features(prototypes, e_node_feats, e_targets)
+            logits = model.classify_features(prototypes, e_node_feats)
 
             predictions = (logits.sigmoid() > 0.5).long().squeeze()
-            batch_f1_target.update(predictions, targets)
+            batch_f1_target.update(predictions, e_targets)
 
         # F1 values can be nan, if e.g. proto_classes contains only one of the 2 classes
         f1_fake_value = batch_f1_target.compute().item()

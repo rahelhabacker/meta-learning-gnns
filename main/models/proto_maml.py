@@ -165,10 +165,14 @@ def run_model(local_model, output_weight, output_bias, x, edge_index, cl_mask, t
     # output_weight shape 1 x 64
     # output_bias shape 1
 
-    all_class_logits = func.linear(logits, output_weight, output_bias)      # should output: batch size x 1
-    logits_target_class = all_class_logits[:, target_class_idx]
+    all_class_logits = func.linear(logits, output_weight, output_bias)  # should output: batch size x 1
 
-    # targets = targets.view(-1, 1) if not len(targets.shape) == 2 else targets
+    if all_class_logits.shape[1] == 2:
+        logits_target_class = all_class_logits[:, target_class_idx]
+    else:
+        # TODO: fix this somehow... now we are using 'real' logits for optimization; maybe project on one dim?
+        logits_target_class = all_class_logits.squeeze()
+
     loss = loss_module(logits_target_class, targets.float()) if loss_module is not None else None
 
     return loss, logits_target_class
@@ -216,7 +220,7 @@ def test_protomaml(model, test_loader, num_classes=1):
                 targets = torch.cat([support_targets, query_targets]).to(DEVICE)
 
                 _, pred = run_model(local_model, output_weight, output_bias, *get_subgraph_batch(graphs), targets,
-                                    target_class_idx, mode)
+                                    mode, target_class_idx)
 
                 f1_target.update(pred, targets)
 
