@@ -123,7 +123,7 @@ class ProtoNet(GraphTrainer):
         # targets have dimensions according to classes which are in the subgraph batch, i.e. if all sub graphs have the
         # same label, targets has 2nd dimension = 1
 
-        logits_target_class = self.get_fake_logits(logits, self.target_class_idx)
+        logits_target_class = get_fake_logits(logits, self.target_class_idx)
 
         loss = self.loss_module(logits_target_class, query_targets.float())
 
