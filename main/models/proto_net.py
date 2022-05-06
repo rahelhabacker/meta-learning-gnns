@@ -78,9 +78,13 @@ class ProtoNet(GraphTrainer):
         # features shape: [N, proto_dim], targets shape: [N]
 
         # Only calculate the prototypes for the target/positive class because we do binary classification
+        target_class_features = torch.where(targets == 1)[0]
 
-        # get all node features for this class and average them
-        prototype = features[torch.where(targets == 1)[0]].mean(dim=0)
+        if target_class_features.numel() == 0:
+            prototype = torch.zeros(64).to(DEVICE)
+        else:
+            # get all node features for this class and average them
+            prototype = features[target_class_features].mean(dim=0)
 
         # prototype should be 1 x 1 for binary classification
         prototype = prototype.unsqueeze(dim=0) if len(prototype.shape) != 2 else prototype
@@ -163,10 +167,7 @@ class ProtoNet(GraphTrainer):
         if mode == 'train' or mode == 'val':
             self.log_on_epoch(f"{mode}/loss", loss)
 
-        # make probabilities out of logits via sigmoid --> especially for the metrics; makes it more interpretable
-        pred = (logits.sigmoid() > 0.5).float()
-
-        self.update_metrics(mode, pred, targets)
+        self.update_metrics(mode, logits, targets)
 
         return loss
 
@@ -241,7 +242,7 @@ def test_proto_net(model, dataset, data_feats=None, k_shot=4, num_classes=1):
         k_node_feats, k_targets = get_as_set(k_idx, k_shot, node_features, node_targets, start_indices_per_class)
         prototype = model.calculate_prototypes(k_node_feats, k_targets)
 
-        batch_f1_target = tm.F1(num_classes=num_classes, average='none')
+        batch_f1_target = tm.F1(num_classes=num_classes, average='none', multiclass=False)
 
         for e_idx in range(0, node_features.shape[0], k_shot):
             if k_idx == e_idx:  # Do not evaluate on the support set examples
@@ -250,8 +251,7 @@ def test_proto_net(model, dataset, data_feats=None, k_shot=4, num_classes=1):
             e_node_feats, e_targets = get_as_set(e_idx, k_shot, node_features, node_targets, start_indices_per_class)
             logits, targets = model.classify_features(prototype, e_node_feats, e_targets)
 
-            predictions = (logits.sigmoid() > 0.5).float()
-
+            predictions = (logits.sigmoid() > 0.5).long().squeeze()
             batch_f1_target.update(predictions, targets)
 
         # F1 values can be nan, if e.g. proto_classes contains only one of the 2 classes

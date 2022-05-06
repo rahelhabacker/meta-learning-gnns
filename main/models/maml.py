@@ -85,10 +85,10 @@ class Maml(GraphTrainer):
             local_model = self.adapt_few_shot(*get_subgraph_batch(support_graphs), support_targets, mode)
 
             # Determine loss of query set
-            loss, query_predictions = run_model(local_model, *get_subgraph_batch(query_graphs), query_targets, mode,
-                                                self.loss_module)
+            loss, logits = run_model(local_model, *get_subgraph_batch(query_graphs), query_targets, mode,
+                                     self.loss_module)
 
-            self.update_metrics(mode, query_predictions, query_targets)
+            self.update_metrics(mode, logits, query_targets)
 
             # Calculate gradients for query set loss
             if mode == "train":
@@ -143,7 +143,7 @@ def run_model(local_model, x, edge_index, cl_mask, targets, mode, loss_module=No
     targets = targets.view(-1, 1) if not len(targets.shape) == 2 else targets
     loss = loss_module(logits, targets.float()) if loss_module is not None else None
 
-    return loss, (logits.sigmoid() > 0.5).float()
+    return loss, logits
 
 
 def test_maml(model, test_loader, num_classes=1):

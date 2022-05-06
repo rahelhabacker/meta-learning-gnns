@@ -44,5 +44,5 @@
 
 MAML & PROTOMAML interactive on Lisa
 
---model proto-maml --seed 3333 --output-lr 1e-3 --inner-lr 5e-4 --hidden-dim 16 --k-shot 40 --epochs 2 --gat-dropout 0.4 --attn-dropout 0.4 --n-workers 0 --wb-mode offline --gat-heads 8 --n-updates 1 --suffix val_loss_no_weight0
---model maml --seed 3333 --output-lr 1e-3 --inner-lr 5e-4 --hidden-dim 16 --k-shot 40 --epochs 2 --gat-dropout 0.4 --attn-dropout 0.4 --n-workers 0 --wb-mode offline --gat-heads 8 --n-updates 1 --suffix val_loss_no_weight0
+--model proto-maml --seed 3333 --output-lr 1e-3 --inner-lr 5e-4 --hidden-dim 16 --k-shot 40 --epochs 2 --gat-dropout 0.4 --attn-dropout 0.4 --n-workers 0 --wb-mode offline --gat-heads 8 --n-updates 1
+--model maml --seed 3333 --output-lr 1e-3 --inner-lr 5e-4 --hidden-dim 16 --k-shot 40 --epochs 2 --gat-dropout 0.4 --attn-dropout 0.4 --n-workers 0 --wb-mode offline --gat-heads 8 --n-updates 1

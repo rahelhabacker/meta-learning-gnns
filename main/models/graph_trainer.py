@@ -26,7 +26,7 @@ class GraphTrainer(pl.LightningModule):
                 metric = tm.F1 if name.startswith('f1') else None
                 if metric is None:
                     raise ValueError(f"Metric with key '{name}' not supported.")
-                split_dict[s] = metric(num_classes=n_classes, average=avg).to(self._device)
+                split_dict[s] = metric(num_classes=n_classes, average=avg, multiclass=False).to(self._device)
 
     def log_on_epoch(self, metric, value):
         self.log(metric, value, on_step=False, on_epoch=True)
@@ -48,7 +48,10 @@ class GraphTrainer(pl.LightningModule):
         super().test_epoch_end(outputs)
         self.compute_and_log_metrics('test')
 
-    def update_metrics(self, mode, predictions, targets):
+    def update_metrics(self, mode, logits, targets):
+        # make probabilities out of logits via sigmoid --> especially for the metrics; makes it more interpretable
+        predictions = (logits.sigmoid() > 0.5).long().squeeze()
+
         for mode_dict, _ in self.metrics.values():
             mode_dict[mode].update(predictions, targets)
 

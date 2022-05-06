@@ -40,6 +40,8 @@ class ProtoMAML(GraphTrainer):
 
         self.model = GatNet(model_params)
 
+        self.automatic_optimization = False
+
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.optimizer_hparams['lr'])
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[140, 180], gamma=0.1)
@@ -107,15 +109,16 @@ class ProtoMAML(GraphTrainer):
                                                                           support_targets, mode)
 
             # Determine loss of query set
-            loss, query_predictions = run_model(local_model, output_weight, output_bias,
-                                                *get_subgraph_batch(query_graphs), query_targets, mode,
-                                                self.loss_module)
+            loss, logits = run_model(local_model, output_weight, output_bias, *get_subgraph_batch(query_graphs),
+                                     query_targets, mode, self.loss_module)
 
-            self.update_metrics(mode, query_predictions, query_targets)
+            self.update_metrics(mode, logits, query_targets)
 
             # Calculate gradients for query set loss
             if mode == "train":
-                loss.backward()     # initializes the grads in the outer model, as we used its support features for prototype computation
+                # initializes the grads in the outer model, as we used its support features for prototype computation
+                # loss.backward()
+                self.manual_backward(loss)
 
                 for i, (p_global, p_local) in enumerate(zip(self.model.parameters(), local_model.parameters())):
                     if p_global.requires_grad is False:
@@ -164,7 +167,7 @@ def run_model(local_model, output_weight, output_bias, x, edge_index, cl_mask, t
     targets = targets.view(-1, 1) if not len(targets.shape) == 2 else targets
     loss = loss_module(logits, targets.float()) if loss_module is not None else None
 
-    return loss, (logits.sigmoid() > 0.5).float()
+    return loss, logits
 
 
 def test_protomaml(model, test_loader, num_classes=1):

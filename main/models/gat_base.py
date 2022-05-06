@@ -67,13 +67,7 @@ class GatBase(GraphTrainer):
 
         logits = self.model(x, edge_index, mode)[cl_mask].squeeze()
 
-        # for param in self.model.named_parameters():
-        #     print(f"Param with name {param[0]} requires grad: {param[1].requires_grad}")
-
-        # make probabilities out of logits via sigmoid --> especially for the metrics; makes it more interpretable
-        predictions = (logits.sigmoid() > 0.5).float()
-
-        self.update_metrics(mode, predictions, targets)
+        self.update_metrics(mode, logits, targets)
 
         # logits are not yet put into a sigmoid layer, because the loss module does this combined
         return logits
@@ -147,14 +141,11 @@ class GatBase(GraphTrainer):
         support_graphs, query_graphs, support_targets, query_targets = batch
 
         if dataloader_idx == 0:
-            # print(f"\nValidation finetune: {batch_idx + 1}")
-
             mode = 'val_support'
 
             # Validation requires to finetune a model, hence we need to enable gradients
             torch.set_grad_enabled(True)
 
-            # Copy model for finetune on the support part and optimizer
             self.validation_model.train()
 
             _, val_optimizer = self.optimizers()
@@ -162,11 +153,9 @@ class GatBase(GraphTrainer):
             x, edge_index, cl_mask = get_subgraph_batch(support_graphs)
             logits = self.validation_model(x, edge_index, mode)[cl_mask].squeeze()
 
-            support_predictions = (logits.sigmoid() > 0.5).float()
-            self.update_metrics(mode, support_predictions, support_targets)
+            self.update_metrics(mode, logits, support_targets)
 
             loss = self.validation_loss(logits, support_targets.float())
-            # loss = func.binary_cross_entropy_with_logits(logits, support_targets.float())
 
             self.log_on_epoch(f"{mode}/loss", loss)
 
@@ -201,8 +190,6 @@ class GatBase(GraphTrainer):
             torch.set_grad_enabled(False)
 
         elif dataloader_idx == 1:
-            # print(f"\nValidation test: {batch_idx + 1}")
-
             # Evaluate on meta test set
             mode = 'val_query'
 
@@ -213,8 +200,7 @@ class GatBase(GraphTrainer):
             logits = self.validation_model(x, edge_index, mode)[cl_mask].squeeze()
             loss = self.validation_loss(logits, query_targets.float())
 
-            query_predictions = (logits.sigmoid() > 0.5).float()
-            self.update_metrics(mode, query_predictions, query_targets)
+            self.update_metrics(mode, logits, query_targets)
 
             # only log this once in the end of an epoch (averaged over steps)
             self.log_on_epoch(f"{mode}/loss", loss)
