@@ -30,41 +30,21 @@ class ProtoNet(GraphTrainer):
 
         self.num_classes = model_params["class_weight"].shape[0]
 
+        self.target_class_idx = 1
+
         # flipping the weights
-        pos_weight = 1 // model_params["class_weight"]['train'][1]
+        pos_weight = 1 // model_params["class_weight"]['train'][self.target_class_idx]
         print(f"Using positive weight: {pos_weight}")
         self.loss_module = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
         self.model = GatNet(model_params)
 
+        self.automatic_optimization = False
+
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.optimizer_hparams['lr'])
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[140, 180], gamma=0.1)
         return [optimizer], [scheduler]
-
-    # def configure_optimizers(self):
-    #     opt_params = self.hparams.optimizer_hparams
-    #
-    #     if opt_params['optimizer'] == 'Adam':
-    #         optimizer = AdamW(self.model.parameters(), lr=opt_params['lr'],
-    #                           weight_decay=opt_params['weight_decay'])
-    #     # elif opt_params['optimizer'] == 'RAdam':
-    #     #     self.optimizer = RiemannianAdam(self.model.parameters(), lr=config['lr'],
-    #     #                                     weight_decay=config['weight_decay'])
-    #     elif opt_params['optimizer'] == 'SGD':
-    #         optimizer = SGD(self.model.parameters(), lr=opt_params['lr'], momentum=opt_params['momentum'],
-    #                         weight_decay=opt_params['weight_decay'])
-    #     else:
-    #         raise ValueError("No optimizer name provided!")
-    #
-    #     scheduler = None
-    #     if opt_params['scheduler'] == 'step':
-    #         scheduler = StepLR(optimizer, step_size=opt_params['lr_decay_epochs'], gamma=opt_params['lr_decay_factor'])
-    #     elif opt_params['scheduler'] == 'multi_step':
-    #         scheduler = MultiStepLR(optimizer, milestones=[5, 10, 15, 20, 30, 40, 55],
-    #                                 gamma=opt_params['lr_decay_factor'])
-    #
-    #     return [optimizer], [] if scheduler is None else [scheduler]
 
     @staticmethod
     def calculate_prototypes(features, targets):
@@ -77,20 +57,19 @@ class ProtoNet(GraphTrainer):
 
         # features shape: [N, proto_dim], targets shape: [N]
 
-        # Only calculate the prototypes for the target/positive class because we do binary classification
-        target_class_features = torch.where(targets == 1)[0]
+        # Determine which classes we have
+        classes, _ = torch.unique(targets).sort()
+        prototypes = []
 
-        if target_class_features.numel() == 0:
-            prototype = torch.zeros(64).to(DEVICE)
-        else:
-            # get all node features for this class and average them
-            prototype = features[target_class_features].mean(dim=0)
+        for c in classes:
+            # noinspection PyTypeChecker
+            p = features[torch.where(targets == c)[0]].mean(dim=0)  # Average class feature vectors
+            prototypes.append(p)
 
-        # prototype should be 1 x 1 for binary classification
-        prototype = prototype.unsqueeze(dim=0) if len(prototype.shape) != 2 else prototype
+        prototypes = torch.stack(prototypes, dim=0)
 
-        # returns just one prototype, namely for the target class
-        return prototype
+        # Return the 'classes' tensor to know which prototype belongs to which class
+        return prototypes, classes
 
     @staticmethod
     def classify_features(prototypes, feats, targets):
@@ -133,7 +112,7 @@ class ProtoNet(GraphTrainer):
             "Nr of features returned does not equal nr. of classification nodes!"
 
         # support logits: episode size x 2, support targets: episode size x 1
-        prototype = ProtoNet.calculate_prototypes(support_logits, support_targets)
+        prototypes, classes = ProtoNet.calculate_prototypes(support_logits, support_targets)
 
         x, edge_index, cl_mask = get_subgraph_batch(query_graphs)
         query_logits = self.model(x, edge_index, mode)[cl_mask]
@@ -141,7 +120,7 @@ class ProtoNet(GraphTrainer):
         assert query_logits.shape[0] == query_targets.shape[0], \
             "Nr of features returned does not equal nr. of classification nodes!"
 
-        logits, targets = ProtoNet.classify_features(prototype, query_logits, query_targets)
+        logits, targets = ProtoNet.classify_features(prototypes, query_logits, query_targets)
         # logits and targets: batch size x 1
 
         # if predictions.shape[1] != self.num_classes:
@@ -153,11 +132,6 @@ class ProtoNet(GraphTrainer):
         #     # if targets only have one class, we need to pad in order to use weight in loss function
         #     n_pad = self.num_classes - targets.shape[1]
         #     targets = func.pad(targets, pad=(0, n_pad), value=0)
-
-        # meta_loss = func.binary_cross_entropy_with_logits(logits, targets.float())
-
-        # for cross entropy
-        # targets = targets.long().argmax(dim=-1)
 
         # targets have dimensions according to classes which are in the subgraph batch, i.e. if all sub graphs have the
         # same label, targets has 2nd dimension = 1
@@ -240,7 +214,7 @@ def test_proto_net(model, dataset, data_feats=None, k_shot=4, num_classes=1):
     for k_idx in tqdm(range(0, node_features.shape[0], k_shot), "Evaluating prototype classification", leave=False):
         # Select support set (k examples per class) and calculate prototypes
         k_node_feats, k_targets = get_as_set(k_idx, k_shot, node_features, node_targets, start_indices_per_class)
-        prototype = model.calculate_prototypes(k_node_feats, k_targets)
+        prototypes, classes = model.calculate_prototypes(k_node_feats, k_targets)
 
         batch_f1_target = tm.F1(num_classes=num_classes, average='none', multiclass=False)
 
@@ -249,7 +223,7 @@ def test_proto_net(model, dataset, data_feats=None, k_shot=4, num_classes=1):
                 continue
 
             e_node_feats, e_targets = get_as_set(e_idx, k_shot, node_features, node_targets, start_indices_per_class)
-            logits, targets = model.classify_features(prototype, e_node_feats, e_targets)
+            logits, targets = model.classify_features(prototypes, e_node_feats, e_targets)
 
             predictions = (logits.sigmoid() > 0.5).long().squeeze()
             batch_f1_target.update(predictions, targets)

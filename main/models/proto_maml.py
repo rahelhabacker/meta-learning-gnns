@@ -34,7 +34,9 @@ class ProtoMAML(GraphTrainer):
 
         self.lr_inner = self.hparams.optimizer_hparams['lr_inner']
 
-        pos_weight = 1 // model_params["class_weight"]['train'][1]
+        self.target_class_idx = 1
+
+        pos_weight = 1 // model_params["class_weight"]['train'][self.target_class_idx]
         print(f"Using positive weight: {pos_weight}")
         self.loss_module = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
@@ -52,7 +54,7 @@ class ProtoMAML(GraphTrainer):
         # Determine prototype initialization
         support_feats = self.model(x, edge_index, mode).squeeze()[cl_mask]
 
-        prototype = ProtoNet.calculate_prototypes(support_feats, support_targets)
+        prototypes, classes = ProtoNet.calculate_prototypes(support_feats, support_targets)
 
         # Copy model for inner-loop model and optimizer
         local_model = deepcopy(self.model)
@@ -61,8 +63,8 @@ class ProtoMAML(GraphTrainer):
         local_optim.zero_grad()
 
         # Create output layer weights with prototype-based initialization
-        init_weight = 2 * prototype
-        init_bias = -torch.norm(prototype, dim=1) ** 2
+        init_weight = 2 * prototypes
+        init_bias = -torch.norm(prototypes, dim=1) ** 2
         output_weight = init_weight.detach().requires_grad_()
         output_bias = init_bias.detach().requires_grad_()
 
@@ -72,7 +74,7 @@ class ProtoMAML(GraphTrainer):
         for _ in range(updates):
             # Determine loss on the support set
             loss, _ = run_model(local_model, output_weight, output_bias, x, edge_index, cl_mask, support_targets, mode,
-                                self.loss_module)
+                                self.target_class_idx, self.loss_module)
 
             # Calculate gradients and perform inner loop update
             loss.backward()
@@ -110,7 +112,7 @@ class ProtoMAML(GraphTrainer):
 
             # Determine loss of query set
             loss, logits = run_model(local_model, output_weight, output_bias, *get_subgraph_batch(query_graphs),
-                                     query_targets, mode, self.loss_module)
+                                     query_targets, mode, self.target_class_idx, self.loss_module)
 
             self.update_metrics(mode, logits, query_targets)
 
@@ -150,7 +152,8 @@ class ProtoMAML(GraphTrainer):
         torch.set_grad_enabled(False)
 
 
-def run_model(local_model, output_weight, output_bias, x, edge_index, cl_mask, targets, mode, loss_module=None):
+def run_model(local_model, output_weight, output_bias, x, edge_index, cl_mask, targets, mode, target_class_idx,
+              loss_module=None):
     """
     Execute a model with given output layer weights and inputs.
     """
@@ -162,12 +165,13 @@ def run_model(local_model, output_weight, output_bias, x, edge_index, cl_mask, t
     # output_weight shape 1 x 64
     # output_bias shape 1
 
-    logits = func.linear(logits, output_weight, output_bias)
+    all_class_logits = func.linear(logits, output_weight, output_bias)      # should output: batch size x 1
+    logits_target_class = all_class_logits[:, target_class_idx]
 
-    targets = targets.view(-1, 1) if not len(targets.shape) == 2 else targets
-    loss = loss_module(logits, targets.float()) if loss_module is not None else None
+    # targets = targets.view(-1, 1) if not len(targets.shape) == 2 else targets
+    loss = loss_module(logits_target_class, targets.float()) if loss_module is not None else None
 
-    return loss, logits
+    return loss, logits_target_class
 
 
 def test_protomaml(model, test_loader, num_classes=1):
@@ -183,6 +187,7 @@ def test_protomaml(model, test_loader, num_classes=1):
     # First, to select the k-shot batch. Second, to evaluate the model on all other batches.
 
     f1_fakes = []
+    target_class_idx = 1
 
     for support_batch_idx, batch in tqdm(enumerate(test_loader), "Performing few-shot fine tuning in testing"):
         support_graphs, _, support_targets, _ = batch
@@ -210,7 +215,8 @@ def test_protomaml(model, test_loader, num_classes=1):
                 graphs = support_graphs + query_graphs
                 targets = torch.cat([support_targets, query_targets]).to(DEVICE)
 
-                _, pred = run_model(local_model, output_weight, output_bias, *get_subgraph_batch(graphs), targets, mode)
+                _, pred = run_model(local_model, output_weight, output_bias, *get_subgraph_batch(graphs), targets,
+                                    target_class_idx, mode)
 
                 f1_target.update(pred, targets)
 
