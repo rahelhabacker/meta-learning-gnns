@@ -120,24 +120,10 @@ class ProtoNet(GraphTrainer):
         logits = ProtoNet.classify_features(prototypes, query_logits)
         # logits and targets: batch size x 1
 
-        # if predictions.shape[1] != self.num_classes:
-        #     # if predictions only have one class, we need to pad in order to use weight in loss function
-        #     n_pad = self.num_classes - predictions.shape[1]
-        #     predictions = func.pad(predictions, pad=(0, n_pad), value=0)
-
-        # if targets.shape[1] != self.num_classes:
-        #     # if targets only have one class, we need to pad in order to use weight in loss function
-        #     n_pad = self.num_classes - targets.shape[1]
-        #     targets = func.pad(targets, pad=(0, n_pad), value=0)
-
         # targets have dimensions according to classes which are in the subgraph batch, i.e. if all sub graphs have the
         # same label, targets has 2nd dimension = 1
 
-        if logits.shape[1] == 2:
-            logits_target_class = logits[:, self.target_class_idx]
-        else:
-            # TODO: fix this somehow... now we are using 'real' logits for optimization; maybe project on one dim?
-            logits_target_class = logits.squeeze()
+        logits_target_class = self.get_fake_logits(logits, self.target_class_idx)
 
         loss = self.loss_module(logits_target_class, query_targets.float())
 
@@ -153,6 +139,16 @@ class ProtoNet(GraphTrainer):
 
     def validation_step(self, batch, batch_idx):
         self.calculate_loss(batch, mode="val")
+
+
+def get_fake_logits(logits, target_class_idx):
+    if logits.shape[1] == 2:
+        logits_target_class = logits[:, target_class_idx]
+    else:
+        # TODO: fix this somehow... now we are using 'real' logits for optimization; maybe project on one dim?
+        logits_target_class = logits.squeeze()
+
+    return logits_target_class
 
 
 @torch.no_grad()
@@ -228,7 +224,8 @@ def test_proto_net(model, dataset, data_feats=None, k_shot=4, num_classes=1):
             e_node_feats, e_targets = get_as_set(e_idx, k_shot, node_features, node_targets, start_indices_per_class)
             logits = model.classify_features(prototypes, e_node_feats)
 
-            predictions = (logits.sigmoid() > 0.5).long().squeeze()
+            logits_target_class = get_fake_logits(logits, 1)
+            predictions = (logits_target_class.sigmoid() > 0.5).long().squeeze()
             batch_f1_target.update(predictions, e_targets)
 
         # F1 values can be nan, if e.g. proto_classes contains only one of the 2 classes

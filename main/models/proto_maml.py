@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 from models.gat_encoder_sparse_pushkar import GatNet
 from models.graph_trainer import GraphTrainer
-from models.proto_net import ProtoNet
+from models.proto_net import ProtoNet, get_fake_logits
 from models.train_utils import *
 from samplers.batch_sampler import split_list
 
@@ -165,13 +165,8 @@ def run_model(local_model, output_weight, output_bias, x, edge_index, cl_mask, t
     # output_weight shape 1 x 64
     # output_bias shape 1
 
-    all_class_logits = func.linear(logits, output_weight, output_bias)  # should output: batch size x 1
-
-    if all_class_logits.shape[1] == 2:
-        logits_target_class = all_class_logits[:, target_class_idx]
-    else:
-        # TODO: fix this somehow... now we are using 'real' logits for optimization; maybe project on one dim?
-        logits_target_class = all_class_logits.squeeze()
+    logits = func.linear(logits, output_weight, output_bias)  # should output: batch size x 1
+    logits_target_class = get_fake_logits(logits, target_class_idx)
 
     loss = loss_module(logits_target_class, targets.float()) if loss_module is not None else None
 
